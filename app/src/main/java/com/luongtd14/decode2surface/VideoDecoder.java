@@ -13,8 +13,14 @@ import java.nio.ByteBuffer;
 public class VideoDecoder {
     private static final String TAG = "VideoDecoder";
     private static final long TIMEOUT_US = 10000;
+    private volatile boolean isStopped = false;
+
+    public void stop() {
+        isStopped = true;
+    }
 
     public void decodeToFile(String inputPath, String outputFilePath) throws IOException {
+        isStopped = false;
         Log.d(TAG, "decodeToFile started: " + inputPath);
         MediaExtractor extractor = new MediaExtractor();
         extractor.setDataSource(inputPath);
@@ -46,6 +52,7 @@ public class VideoDecoder {
             throw new RuntimeException("Surface is null or invalid");
         }
 
+        isStopped = false;
         Log.d(TAG, "decodeToSurface started: " + inputPath);
         MediaExtractor extractor = new MediaExtractor();
         extractor.setDataSource(inputPath);
@@ -60,7 +67,6 @@ public class VideoDecoder {
         MediaFormat format = extractor.getTrackFormat(trackIndex);
         MediaCodec decoder = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME));
         
-        // Cấu hình decoder để render trực tiếp lên Surface
         decoder.configure(format, surface, null, 0);
         decoder.start();
 
@@ -83,7 +89,7 @@ public class VideoDecoder {
         long firstSampleTimeUs = -1;
         int frameCount = 0;
 
-        while (!isOutputEOS) {
+        while (!isOutputEOS && !isStopped) {
             if (!isInputEOS) {
                 int inIdx = decoder.dequeueInputBuffer(TIMEOUT_US);
                 if (inIdx >= 0) {
@@ -106,7 +112,6 @@ public class VideoDecoder {
                 }
 
                 if (surface != null) {
-                    // Đồng bộ thời gian để video chạy đúng tốc độ
                     if (startMs == -1) {
                         startMs = System.currentTimeMillis();
                         firstSampleTimeUs = info.presentationTimeUs;
@@ -122,7 +127,6 @@ public class VideoDecoder {
                             Thread.currentThread().interrupt();
                         }
                     }
-                    // Render lên surface (chỉ render nếu có dữ liệu)
                     decoder.releaseOutputBuffer(outIdx, info.size > 0);
                 } else if (fos != null) {
                     ByteBuffer outBuf = decoder.getOutputBuffer(outIdx);

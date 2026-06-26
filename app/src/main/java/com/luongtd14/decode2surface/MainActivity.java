@@ -38,6 +38,7 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     private final List<String> selectedPaths = new ArrayList<>();
     private VideoDecoder videoDecoder;
     private boolean isSurfaceReady = false;
+    private volatile boolean isRunning = false;
 
     private final ActivityResultLauncher<Intent> videoPickerLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -73,6 +74,7 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
         binding.btnPickVideos.setOnClickListener(v -> pickVideos());
         binding.btnDecodeToFile.setOnClickListener(v -> startDecoding(true));
         binding.btnDecodeToSurface.setOnClickListener(v -> startDecoding(false));
+        binding.btnStop.setOnClickListener(v -> stopDecoding());
 
         requestPermissions();
     }
@@ -100,6 +102,21 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
         binding.tvSelectedFiles.setText(selectedPaths.isEmpty() ? "No files selected" : sb.toString().trim());
     }
 
+    private void setUIEnabled(boolean enabled) {
+        runOnUiThread(() -> {
+            binding.btnPickVideos.setEnabled(enabled);
+            binding.btnDecodeToFile.setEnabled(enabled);
+            binding.btnDecodeToSurface.setEnabled(enabled);
+            isRunning = !enabled;
+        });
+    }
+
+    private void stopDecoding() {
+        videoDecoder.stop();
+        isRunning = false;
+        Toast.makeText(this, "Stopping...", Toast.LENGTH_SHORT).show();
+    }
+
     private void startDecoding(boolean toFile) {
         if (selectedPaths.isEmpty()) {
             Toast.makeText(this, "Please select videos first", Toast.LENGTH_SHORT).show();
@@ -110,6 +127,8 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
             Toast.makeText(this, "Surface is not ready yet", Toast.LENGTH_SHORT).show();
             return;
         }
+
+        setUIEnabled(false);
 
         new Thread(() -> {
             for (String path : selectedPaths) {
@@ -139,6 +158,7 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
                     runOnUiThread(() -> Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
                 }
             }
+            setUIEnabled(true);
             runOnUiThread(() -> Toast.makeText(this, "Process Finished", Toast.LENGTH_SHORT).show());
         }).start();
     }

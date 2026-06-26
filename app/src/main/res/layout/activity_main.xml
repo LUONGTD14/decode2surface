@@ -52,7 +52,7 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginHorizontal="10dp"
-            android:text="Dec File" />
+            android:text="Dec2File" />
 
         <Button
             android:id="@+id/btnDecodeToSurface"
@@ -60,7 +60,15 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:layout_marginHorizontal="10dp"
-            android:text="Dec Surface" />
+            android:text="Dec2Sur" />
+
+        <Button
+            android:id="@+id/btnStop"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginHorizontal="10dp"
+            android:text="Stop" />
     </LinearLayout>
 
     <SurfaceView
