@@ -36,7 +36,7 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
 
     private ActivityMainBinding binding;
     private final List<String> selectedPaths = new ArrayList<>();
-    private VideoDecoder videoDecoder;
+    private final VideoDecoder videoDecoder = new VideoDecoder();
     private boolean isSurfaceReady = false;
     private volatile boolean isRunning = false;
 
@@ -68,7 +68,6 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
-        videoDecoder = new VideoDecoder();
         binding.surfaceView.getHolder().addCallback(this);
 
         binding.btnPickVideos.setOnClickListener(v -> pickVideos());
@@ -76,6 +75,7 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
         binding.btnDecodeToSurface.setOnClickListener(v -> startDecoding(false));
         binding.btnStop.setOnClickListener(v -> stopDecoding());
 
+        updateButtonStates();
         requestPermissions();
     }
 
@@ -90,7 +90,6 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     private void updateSelectedFilesUI() {
         StringBuilder sb = new StringBuilder();
         String storageRoot = Environment.getExternalStorageDirectory().getAbsolutePath();
-        
         for (String path : selectedPaths) {
             String displayPath = path;
             if (path.startsWith(storageRoot)) {
@@ -102,18 +101,17 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
         binding.tvSelectedFiles.setText(selectedPaths.isEmpty() ? "No files selected" : sb.toString().trim());
     }
 
-    private void setUIEnabled(boolean enabled) {
+    private void updateButtonStates() {
         runOnUiThread(() -> {
-            binding.btnPickVideos.setEnabled(enabled);
-            binding.btnDecodeToFile.setEnabled(enabled);
-            binding.btnDecodeToSurface.setEnabled(enabled);
-            isRunning = !enabled;
+            binding.btnPickVideos.setEnabled(!isRunning);
+            binding.btnDecodeToFile.setEnabled(!isRunning);
+            binding.btnDecodeToSurface.setEnabled(!isRunning);
+            binding.btnStop.setEnabled(isRunning);
         });
     }
 
     private void stopDecoding() {
         videoDecoder.stop();
-        isRunning = false;
         Toast.makeText(this, "Stopping...", Toast.LENGTH_SHORT).show();
     }
 
@@ -128,7 +126,8 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
             return;
         }
 
-        setUIEnabled(false);
+        isRunning = true;
+        updateButtonStates();
 
         new Thread(() -> {
             for (String path : selectedPaths) {
@@ -136,29 +135,25 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
                     if (toFile) {
                         String timeStamp = new SimpleDateFormat("ddMMyyyy_HHssmm", Locale.getDefault()).format(new Date());
                         String outName = "codec_" + timeStamp + ".raw";
-                        
                         File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
                         if (!downloadsDir.exists()) downloadsDir.mkdirs();
                         String outPath = new File(downloadsDir, outName).getAbsolutePath();
                         
-                        Log.d(TAG, "Decoding: " + path + " -> " + outPath);
+                        Log.d(TAG, "Decoding to file: " + outPath);
                         videoDecoder.decodeToFile(path, outPath);
-                        runOnUiThread(() -> Toast.makeText(this, "Saved: " + outName, Toast.LENGTH_SHORT).show());
                     } else {
                         Surface surface = binding.surfaceView.getHolder().getSurface();
                         if (surface != null && surface.isValid()) {
-                            Log.d(TAG, "Decoding to surface: " + path);
+                            Log.d(TAG, "Decoding to surface (Buffer Mode): " + path);
                             videoDecoder.decodeToSurface(path, surface);
-                        } else {
-                            runOnUiThread(() -> Toast.makeText(this, "Surface is invalid", Toast.LENGTH_SHORT).show());
                         }
                     }
-                } catch (IOException e) {
-                    Log.e(TAG, "Error processing " + path, e);
-                    runOnUiThread(() -> Toast.makeText(this, "Error: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                } catch (Exception e) {
+                    Log.e(TAG, "Error: " + path, e);
                 }
             }
-            setUIEnabled(true);
+            isRunning = false;
+            updateButtonStates();
             runOnUiThread(() -> Toast.makeText(this, "Process Finished", Toast.LENGTH_SHORT).show());
         }).start();
     }
@@ -166,18 +161,16 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     @Override
     public void surfaceCreated(@NonNull SurfaceHolder holder) {
         isSurfaceReady = true;
-        Log.d(TAG, "Surface Created");
+        Log.d(TAG, "Surface Ready");
     }
 
     @Override
-    public void surfaceChanged(@NonNull SurfaceHolder holder, int format, int width, int height) {
-        Log.d(TAG, "Surface Changed: " + width + "x" + height);
-    }
+    public void surfaceChanged(@NonNull SurfaceHolder holder, int format, int width, int height) {}
 
     @Override
     public void surfaceDestroyed(@NonNull SurfaceHolder holder) {
         isSurfaceReady = false;
-        Log.d(TAG, "Surface Destroyed");
+        videoDecoder.stop();
     }
 
     private void requestPermissions() {
@@ -196,13 +189,9 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
             String[] perms = {Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE};
             List<String> needed = new ArrayList<>();
             for (String p : perms) {
-                if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) {
-                    needed.add(p);
-                }
+                if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) needed.add(p);
             }
-            if (!needed.isEmpty()) {
-                ActivityCompat.requestPermissions(this, needed.toArray(new String[0]), PERMISSION_REQUEST_CODE);
-            }
+            if (!needed.isEmpty()) ActivityCompat.requestPermissions(this, needed.toArray(new String[0]), PERMISSION_REQUEST_CODE);
         }
     }
 

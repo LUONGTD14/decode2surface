@@ -1,5 +1,9 @@
 package com.luongtd14.decode2surface;
 
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Rect;
+import android.media.Image;
 import android.media.MediaCodec;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
@@ -21,39 +25,15 @@ public class VideoDecoder {
 
     public void decodeToFile(String inputPath, String outputFilePath) throws IOException {
         isStopped = false;
-        Log.d(TAG, "decodeToFile started: " + inputPath);
-        MediaExtractor extractor = new MediaExtractor();
-        extractor.setDataSource(inputPath);
-
-        int trackIndex = selectVideoTrack(extractor);
-        if (trackIndex < 0) {
-            extractor.release();
-            throw new RuntimeException("No video track found");
-        }
-        extractor.selectTrack(trackIndex);
-
-        MediaFormat format = extractor.getTrackFormat(trackIndex);
-        MediaCodec decoder = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME));
-        decoder.configure(format, null, null, 0);
-        decoder.start();
-
-        try (FileOutputStream fos = new FileOutputStream(outputFilePath)) {
-            decodeLoop(extractor, decoder, null, fos);
-        } finally {
-            decoder.stop();
-            decoder.release();
-            extractor.release();
-            Log.d(TAG, "decodeToFile finished");
-        }
+        process(inputPath, null, outputFilePath);
     }
 
     public void decodeToSurface(String inputPath, Surface surface) throws IOException {
-        if (surface == null || !surface.isValid()) {
-            throw new RuntimeException("Surface is null or invalid");
-        }
-
         isStopped = false;
-        Log.d(TAG, "decodeToSurface started: " + inputPath);
+        process(inputPath, surface, null);
+    }
+
+    private void process(String inputPath, Surface surface, String outputFilePath) throws IOException {
         MediaExtractor extractor = new MediaExtractor();
         extractor.setDataSource(inputPath);
 
@@ -65,18 +45,26 @@ public class VideoDecoder {
         extractor.selectTrack(trackIndex);
 
         MediaFormat format = extractor.getTrackFormat(trackIndex);
-        MediaCodec decoder = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME));
-        
-        decoder.configure(format, surface, null, 0);
+        String mime = format.getString(MediaFormat.KEY_MIME);
+
+        MediaCodec decoder = MediaCodec.createDecoderByType(mime);
+        // BUFFER MODE: Configure with null surface
+        decoder.configure(format, null, null, 0);
         decoder.start();
 
+        FileOutputStream fos = (outputFilePath != null) ? new FileOutputStream(outputFilePath) : null;
+
         try {
-            decodeLoop(extractor, decoder, surface, null);
+            decodeLoop(extractor, decoder, surface, fos);
         } finally {
             decoder.stop();
             decoder.release();
             extractor.release();
-            Log.d(TAG, "decodeToSurface finished");
+            if (fos != null) {
+                try {
+                    fos.close();
+                } catch (IOException ignored) {}
+            }
         }
     }
 
@@ -84,10 +72,8 @@ public class VideoDecoder {
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
         boolean isInputEOS = false;
         boolean isOutputEOS = false;
-        
         long startMs = -1;
         long firstSampleTimeUs = -1;
-        int frameCount = 0;
 
         while (!isOutputEOS && !isStopped) {
             if (!isInputEOS) {
@@ -111,15 +97,24 @@ public class VideoDecoder {
                     isOutputEOS = true;
                 }
 
-                if (surface != null) {
+                if (fos != null && info.size > 0) {
+                    ByteBuffer outBuf = decoder.getOutputBuffer(outIdx);
+                    byte[] data = new byte[info.size];
+                    outBuf.get(data);
+                    try {
+                        fos.write(data);
+                    } catch (IOException ignored) {}
+                } else if (surface != null && info.size > 0) {
+                    // Render thực tế nội dung frame từ Buffer lên Surface
+                    renderBufferToSurface(decoder, outIdx, info, surface);
+
+                    // Sync timing
                     if (startMs == -1) {
                         startMs = System.currentTimeMillis();
                         firstSampleTimeUs = info.presentationTimeUs;
                     }
-                    
                     long playTimeUs = info.presentationTimeUs - firstSampleTimeUs;
                     long sleepTimeMs = (playTimeUs / 1000) - (System.currentTimeMillis() - startMs);
-                    
                     if (sleepTimeMs > 10) {
                         try {
                             Thread.sleep(sleepTimeMs);
@@ -127,27 +122,67 @@ public class VideoDecoder {
                             Thread.currentThread().interrupt();
                         }
                     }
-                    decoder.releaseOutputBuffer(outIdx, info.size > 0);
-                } else if (fos != null) {
-                    ByteBuffer outBuf = decoder.getOutputBuffer(outIdx);
-                    if (info.size > 0 && outBuf != null) {
-                        byte[] data = new byte[info.size];
-                        outBuf.get(data);
-                        try {
-                            fos.write(data);
-                        } catch (IOException e) {
-                            Log.e(TAG, "Write error", e);
-                        }
-                    }
-                    decoder.releaseOutputBuffer(outIdx, false);
-                } else {
-                    decoder.releaseOutputBuffer(outIdx, false);
                 }
-                
-                frameCount++;
-                if (frameCount % 60 == 0) Log.d(TAG, "Decoded frames: " + frameCount);
+
+                decoder.releaseOutputBuffer(outIdx, false);
             }
         }
+    }
+
+    private void renderBufferToSurface(MediaCodec decoder, int index, MediaCodec.BufferInfo info, Surface surface) {
+        try (Image image = decoder.getOutputImage(index)) {
+            if (image != null) {
+                Bitmap bitmap = yuv420ToBitmap(image);
+                Canvas canvas = surface.lockCanvas(null);
+                if (canvas != null) {
+                    canvas.drawBitmap(bitmap, null, new Rect(0, 0, canvas.getWidth(), canvas.getHeight()), null);
+                    surface.unlockCanvasAndPost(canvas);
+                }
+                bitmap.recycle();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Manual render error", e);
+        }
+    }
+
+    private Bitmap yuv420ToBitmap(Image image) {
+        int width = image.getWidth();
+        int height = image.getHeight();
+        Image.Plane[] planes = image.getPlanes();
+        ByteBuffer yBuffer = planes[0].getBuffer();
+        ByteBuffer uBuffer = planes[1].getBuffer();
+        ByteBuffer vBuffer = planes[2].getBuffer();
+
+        int yRowStride = planes[0].getRowStride();
+        int uvRowStride = planes[1].getRowStride();
+        int uvPixelStride = planes[1].getPixelStride();
+
+        int[] pixels = new int[width * height];
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int yIdx = y * yRowStride + x;
+                int uvIdx = (y / 2) * uvRowStride + (x / 2) * uvPixelStride;
+
+                int Y = (yBuffer.get(yIdx) & 0xff);
+                int U = (uBuffer.get(uvIdx) & 0xff) - 128;
+                int V = (vBuffer.get(uvIdx) & 0xff) - 128;
+
+                int r = (int) (Y + 1.370705f * V);
+                int g = (int) (Y - 0.337633f * U - 0.698001f * V);
+                int b = (int) (Y + 1.732446f * U);
+
+                r = Math.max(0, Math.min(255, r));
+                g = Math.max(0, Math.min(255, g));
+                b = Math.max(0, Math.min(255, b));
+
+                pixels[y * width + x] = 0xff000000 | (r << 16) | (g << 8) | b;
+            }
+        }
+
+        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        bitmap.setPixels(pixels, 0, width, 0, 0, width, height);
+        return bitmap;
     }
 
     private int selectVideoTrack(MediaExtractor extractor) {
