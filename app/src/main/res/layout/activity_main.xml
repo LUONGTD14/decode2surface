@@ -1,81 +1,105 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp">
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:weightSum="10"
-        android:orientation="horizontal">
-
-        <ScrollView
-            android:layout_width="0dp"
-            android:layout_height="60dp"
-            android:layout_weight="9"
-            android:layout_marginTop="8dp"
-            android:background="#F5F5F5"
-            android:padding="4dp">
-
-            <TextView
-                android:id="@+id/tvSelectedFiles"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="No files selected"
-                android:textSize="12sp" />
-        </ScrollView>
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnPickVideos"
-            style="@style/Widget.MaterialComponents.Button.TextButton.Icon"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_gravity="center_horizontal"
-            app:icon="@drawable/icon_file_24" />
-
-    </LinearLayout>
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:orientation="horizontal">
-
-        <Button
-            android:id="@+id/btnDecodeToFile"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginHorizontal="10dp"
-            android:text="Dec2File" />
-
-        <Button
-            android:id="@+id/btnDecodeToSurface"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginHorizontal="10dp"
-            android:text="Dec2Sur" />
-
-        <Button
-            android:id="@+id/btnStop"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginHorizontal="10dp"
-            android:text="Stop" />
-    </LinearLayout>
+    android:background="@android:color/black">
 
     <SurfaceView
         android:id="@+id/surfaceView"
-        android:layout_width="match_parent"
+        android:layout_width="0dp"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginTop="16dp" />
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
-</LinearLayout>
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="16dp"
+        app:cardCornerRadius="12dp"
+        app:cardElevation="0dp"
+        app:cardBackgroundColor="@android:color/transparent"
+        app:strokeWidth="0dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="12dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:weightSum="10"
+                android:orientation="horizontal">
+
+                <ScrollView
+                    android:layout_width="0dp"
+                    android:layout_height="60dp"
+                    android:layout_weight="8.5"
+                    android:background="#26FFFFFF"
+                    android:padding="4dp">
+
+                    <TextView
+                        android:id="@+id/tvSelectedFiles"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="No files selected"
+                        android:textColor="@android:color/white"
+                        android:textSize="12sp" />
+                </ScrollView>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnPickVideos"
+                    style="@style/Widget.MaterialComponents.Button.TextButton.Icon"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1.5"
+                    android:layout_gravity="center_vertical"
+                    android:layout_marginStart="8dp"
+                    app:iconTint="@android:color/white"
+                    app:icon="@drawable/icon_file_24" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btnDecodeToFile"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginHorizontal="4dp"
+                    android:text="Dec2File"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btnDecodeToSurface"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginHorizontal="4dp"
+                    android:text="Dec2Sur"
+                    android:textSize="12sp" />
+
+                <Button
+                    android:id="@+id/btnStop"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginHorizontal="4dp"
+                    android:text="Stop"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+</androidx.constraintlayout.widget.ConstraintLayout>
