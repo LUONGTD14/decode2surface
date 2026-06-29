@@ -4,6 +4,7 @@ import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.opengl.GLSurfaceView;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
@@ -11,6 +12,7 @@ import android.provider.Settings;
 import android.util.Log;
 import android.view.Surface;
 import android.view.SurfaceHolder;
+import android.view.View;
 import android.widget.Toast;
 
 import androidx.activity.result.ActivityResultLauncher;
@@ -23,7 +25,6 @@ import androidx.core.content.ContextCompat;
 import com.luongtd14.decode2surface.databinding.ActivityMainBinding;
 
 import java.io.File;
-import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -37,7 +38,11 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
     private ActivityMainBinding binding;
     private final List<String> selectedPaths = new ArrayList<>();
     private final VideoDecoder videoDecoder = new VideoDecoder();
-    private boolean isSurfaceReady = false;
+    
+    private Surface legacySurface;
+    private Surface glSurface;
+    private volatile boolean isLegacySurfaceReady = false;
+    private volatile boolean isGLSurfaceReady = false;
     private volatile boolean isRunning = false;
 
     private final ActivityResultLauncher<Intent> videoPickerLauncher = registerForActivityResult(
@@ -62,21 +67,44 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
             }
     );
 
+    private enum DecodeMode { FILE, SURFACE, SURFACE_GL }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
 
+        // Setup Legacy SurfaceView
         binding.surfaceView.getHolder().addCallback(this);
 
+        // Setup GLSurfaceView
+        setupGL();
+
+        // Đặt trạng thái ban đầu: Hiện SurfaceView cũ, ẩn GLSurfaceView (nhưng vẫn để Invisible để nó khởi tạo)
+        binding.surfaceView.setVisibility(View.VISIBLE);
+        binding.glSurfaceView.setVisibility(View.INVISIBLE);
+
         binding.btnPickVideos.setOnClickListener(v -> pickVideos());
-        binding.btnDecodeToFile.setOnClickListener(v -> startDecoding(true));
-        binding.btnDecodeToSurface.setOnClickListener(v -> startDecoding(false));
+        binding.btnDecodeToFile.setOnClickListener(v -> startDecoding(DecodeMode.FILE));
+        binding.btnDecodeToSurface.setOnClickListener(v -> startDecoding(DecodeMode.SURFACE));
+        binding.btnDecodeToSurfaceGL.setOnClickListener(v -> startDecoding(DecodeMode.SURFACE_GL));
         binding.btnStop.setOnClickListener(v -> stopDecoding());
 
         updateButtonStates();
         requestPermissions();
+    }
+
+    private void setupGL() {
+        binding.glSurfaceView.setEGLContextClientVersion(2);
+        GLRenderer renderer = new GLRenderer();
+        renderer.setOnSurfaceReadyListener(surface -> {
+            glSurface = surface;
+            isGLSurfaceReady = true;
+            Log.d(TAG, "OpenGL Surface Ready");
+        });
+        binding.glSurfaceView.setRenderer(renderer);
+        binding.glSurfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
     }
 
     private void pickVideos() {
@@ -106,6 +134,7 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
             binding.btnPickVideos.setEnabled(!isRunning);
             binding.btnDecodeToFile.setEnabled(!isRunning);
             binding.btnDecodeToSurface.setEnabled(!isRunning);
+            binding.btnDecodeToSurfaceGL.setEnabled(!isRunning);
             binding.btnStop.setEnabled(isRunning);
         });
     }
@@ -115,38 +144,59 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
         Toast.makeText(this, "Stopping...", Toast.LENGTH_SHORT).show();
     }
 
-    private void startDecoding(boolean toFile) {
+    private void startDecoding(DecodeMode mode) {
         if (selectedPaths.isEmpty()) {
             Toast.makeText(this, "Please select videos first", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        if (!toFile && !isSurfaceReady) {
-            Toast.makeText(this, "Surface is not ready yet", Toast.LENGTH_SHORT).show();
+        if (mode == DecodeMode.SURFACE && !isLegacySurfaceReady) {
+            Toast.makeText(this, "Legacy Surface not ready", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Nếu chọn GL nhưng chưa ready, thử hiện view lên để ép hệ thống khởi tạo
+        if (mode == DecodeMode.SURFACE_GL && !isGLSurfaceReady) {
+            runOnUiThread(() -> {
+                binding.glSurfaceView.setVisibility(View.VISIBLE);
+                binding.surfaceView.setVisibility(View.GONE);
+            });
+            Toast.makeText(this, "Waiting for OpenGL initialization...", Toast.LENGTH_SHORT).show();
             return;
         }
 
         isRunning = true;
         updateButtonStates();
 
+        // Switch View Visibility
+        runOnUiThread(() -> {
+            binding.surfaceView.setVisibility(mode == DecodeMode.SURFACE ? View.VISIBLE : View.GONE);
+            binding.glSurfaceView.setVisibility(mode == DecodeMode.SURFACE_GL ? View.VISIBLE : View.GONE);
+        });
+
         new Thread(() -> {
             for (String path : selectedPaths) {
                 try {
-                    if (toFile) {
-                        String timeStamp = new SimpleDateFormat("ddMMyyyy_HHssmm", Locale.getDefault()).format(new Date());
-                        String outName = "codec_" + timeStamp + ".raw";
-                        File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                        if (!downloadsDir.exists()) downloadsDir.mkdirs();
-                        String outPath = new File(downloadsDir, outName).getAbsolutePath();
-                        
-                        Log.d(TAG, "Decoding to file: " + outPath);
-                        videoDecoder.decodeToFile(path, outPath);
-                    } else {
-                        Surface surface = binding.surfaceView.getHolder().getSurface();
-                        if (surface != null && surface.isValid()) {
-                            Log.d(TAG, "Decoding to surface (Buffer Mode): " + path);
-                            videoDecoder.decodeToSurface(path, surface);
-                        }
+                    switch (mode) {
+                        case FILE:
+                            String timeStamp = new SimpleDateFormat("ddMMyyyy_HHssmm", Locale.getDefault()).format(new Date());
+                            String outPath = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), 
+                                    "codec_" + timeStamp + ".raw").getAbsolutePath();
+                            Log.d(TAG, "Decoding to file: " + outPath);
+                            videoDecoder.decodeToFile(path, outPath);
+                            break;
+                        case SURFACE:
+                            if (legacySurface != null && legacySurface.isValid()) {
+                                Log.d(TAG, "Decoding to Legacy Surface (Slow): " + path);
+                                videoDecoder.decodeToSurface(path, legacySurface);
+                            }
+                            break;
+                        case SURFACE_GL:
+                            if (glSurface != null && glSurface.isValid()) {
+                                Log.d(TAG, "Decoding to OpenGL Surface (Fast): " + path);
+                                videoDecoder.decodeToSurfaceGL(path, glSurface);
+                            }
+                            break;
                     }
                 } catch (Exception e) {
                     Log.e(TAG, "Error: " + path, e);
@@ -160,8 +210,9 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
 
     @Override
     public void surfaceCreated(@NonNull SurfaceHolder holder) {
-        isSurfaceReady = true;
-        Log.d(TAG, "Surface Ready");
+        legacySurface = holder.getSurface();
+        isLegacySurfaceReady = true;
+        Log.d(TAG, "Legacy Surface Ready");
     }
 
     @Override
@@ -169,7 +220,20 @@ public class MainActivity extends AppCompatActivity implements SurfaceHolder.Cal
 
     @Override
     public void surfaceDestroyed(@NonNull SurfaceHolder holder) {
-        isSurfaceReady = false;
+        isLegacySurfaceReady = false;
+        videoDecoder.stop();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        binding.glSurfaceView.onResume();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        binding.glSurfaceView.onPause();
         videoDecoder.stop();
     }
 

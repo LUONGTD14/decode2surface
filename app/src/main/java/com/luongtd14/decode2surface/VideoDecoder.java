@@ -4,7 +4,6 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.graphics.Paint;
-import android.graphics.Rect;
 import android.media.Image;
 import android.media.MediaCodec;
 import android.media.MediaExtractor;
@@ -27,15 +26,20 @@ public class VideoDecoder {
 
     public void decodeToFile(String inputPath, String outputFilePath) throws IOException {
         isStopped = false;
-        process(inputPath, null, outputFilePath);
+        process(inputPath, null, outputFilePath, false);
     }
 
     public void decodeToSurface(String inputPath, Surface surface) throws IOException {
         isStopped = false;
-        process(inputPath, surface, null);
+        process(inputPath, surface, null, false);
     }
 
-    private void process(String inputPath, Surface surface, String outputFilePath) throws IOException {
+    public void decodeToSurfaceGL(String inputPath, Surface surface) throws IOException {
+        isStopped = false;
+        process(inputPath, surface, null, true);
+    }
+
+    private void process(String inputPath, Surface surface, String outputFilePath, boolean useHardware) throws IOException {
         MediaExtractor extractor = new MediaExtractor();
         extractor.setDataSource(inputPath);
 
@@ -49,21 +53,26 @@ public class VideoDecoder {
         MediaFormat format = extractor.getTrackFormat(trackIndex);
         String mime = format.getString(MediaFormat.KEY_MIME);
 
-        // Lấy thông tin xoay của video từ metadata
         int rotation = 0;
         if (format.containsKey(MediaFormat.KEY_ROTATION)) {
             rotation = format.getInteger(MediaFormat.KEY_ROTATION);
         }
 
         MediaCodec decoder = MediaCodec.createDecoderByType(mime);
-        // BUFFER MODE: Cấu hình với surface = null
-        decoder.configure(format, null, null, 0);
+        
+        // Cấu hình Surface trực tiếp cho MediaCodec nếu dùng Hardware Mode (OpenGL)
+        if (useHardware && surface != null) {
+            decoder.configure(format, surface, null, 0);
+        } else {
+            decoder.configure(format, null, null, 0);
+        }
+        
         decoder.start();
 
         FileOutputStream fos = (outputFilePath != null) ? new FileOutputStream(outputFilePath) : null;
 
         try {
-            decodeLoop(extractor, decoder, surface, fos, rotation);
+            decodeLoop(extractor, decoder, surface, fos, rotation, useHardware);
         } finally {
             decoder.stop();
             decoder.release();
@@ -76,7 +85,7 @@ public class VideoDecoder {
         }
     }
 
-    private void decodeLoop(MediaExtractor extractor, MediaCodec decoder, Surface surface, FileOutputStream fos, int rotation) {
+    private void decodeLoop(MediaExtractor extractor, MediaCodec decoder, Surface surface, FileOutputStream fos, int rotation, boolean useHardware) {
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
         boolean isInputEOS = false;
         boolean isOutputEOS = false;
@@ -113,9 +122,6 @@ public class VideoDecoder {
                         fos.write(data);
                     } catch (IOException ignored) {}
                 } else if (surface != null && info.size > 0) {
-                    // Render nội dung từ Buffer lên Surface, có xử lý xoay hình ảnh
-                    renderBufferToSurface(decoder, outIdx, info, surface, rotation);
-
                     // Đồng bộ thời gian thực
                     if (startMs == -1) {
                         startMs = System.currentTimeMillis();
@@ -129,6 +135,15 @@ public class VideoDecoder {
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                         }
+                    }
+
+                    if (useHardware) {
+                        // Hardware mode: Render trực tiếp từ bộ đệm của Codec lên Surface
+                        decoder.releaseOutputBuffer(outIdx, true);
+                        continue;
+                    } else {
+                        // Software mode: Lock canvas và vẽ Bitmap thủ công
+                        renderBufferToSurface(decoder, outIdx, info, surface, rotation);
                     }
                 }
 
@@ -148,23 +163,17 @@ public class VideoDecoder {
                     int bitmapWidth = bitmap.getWidth();
                     int bitmapHeight = bitmap.getHeight();
 
-                    // Tính toán kích thước hiệu dụng sau khi xoay (90/270 thì W và H đổi chỗ)
                     int rotatedWidth = (rotation == 90 || rotation == 270) ? bitmapHeight : bitmapWidth;
                     int rotatedHeight = (rotation == 90 || rotation == 270) ? bitmapWidth : bitmapHeight;
 
-                    // Tính toán tỉ lệ Fit Center
                     float scale = Math.min((float) canvasWidth / rotatedWidth, (float) canvasHeight / rotatedHeight);
                     
-                    canvas.drawColor(android.graphics.Color.BLACK); // Xóa nền
+                    canvas.drawColor(android.graphics.Color.BLACK);
 
                     Matrix matrix = new Matrix();
-                    // 1. Dời tâm bitmap về gốc (0,0)
                     matrix.postTranslate(-bitmapWidth / 2f, -bitmapHeight / 2f);
-                    // 2. Thực hiện xoay
                     matrix.postRotate(rotation);
-                    // 3. Thực hiện scale
                     matrix.postScale(scale, scale);
-                    // 4. Dời về tâm màn hình
                     matrix.postTranslate(canvasWidth / 2f, canvasHeight / 2f);
 
                     canvas.drawBitmap(bitmap, matrix, new Paint(Paint.FILTER_BITMAP_FLAG));
